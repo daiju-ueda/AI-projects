@@ -3,6 +3,7 @@
 
 # Images
 *.png
+*.jpg
 
 # h5py
 *.ckpt
