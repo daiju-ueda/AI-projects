@@ -1,0 +1,22 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+torch = "*"
+torchvision = "*"
+torchaudio = "*"
+numpy = "*"
+pandas = "*"
+opencv-python = "*"
+pillow = "*"
+scikit-image = "*"
+scikit-learn = "*"
+h5py = "*"
+visdom = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.7.6"
