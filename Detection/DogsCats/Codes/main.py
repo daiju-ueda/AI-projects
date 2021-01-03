@@ -3,94 +3,57 @@ import pandas as pd
 
 from PIL import Image
 from glob import glob
-import xml.etree.ElementTree as ET
+import os
+import argparse
 
 import torch
 import torchvision
+from torch.utils.data import Dataset
 from torchvision import transforms
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 
-class xml2list(object):
+target_data = 'DogsCats'
+# Arguments
+parser = argparse.ArgumentParser(description= target_data + 'PyTorch Training')
+parser.add_argument('--batch_size', type=int, default=4, metavar='N', help='input batch size for training (default: 64)')
+parser.add_argument('--val_batch_size', type=int, default=50, metavar='N', help='input batch size for val (default: 1000)')
+parser.add_argument('--epochs', type=int, default=1, metavar='N', help='number of epochs to train (default: 10)')
+args = parser.parse_args()
 
-    def __init__(self, classes):
-        self.classes = classes
+img_size = 'Original'
+csvs_path = glob('../Datasets/' + img_size + '/Split/*.csv')
+csv_path = sorted(csvs_path, key=lambda f: os.stat(f).st_mtime, reverse=True)[0] # Fetch newest.
 
-    def __call__(self, xml_path):
+df = pd.read_csv(csv_path)
+# Background class (0) is needed. Dog and cat labels should start from 1.
+df["label"] = df["label"] + 1
 
-        ret = []
-        xml = ET.parse(xml_path).getroot()
-
-        for size in xml.iter("size"):
-            width = float(size.find("width").text)
-            height = float(size.find("height").text)
-
-        for obj in xml.iter("object"):
-            difficult = int(obj.find("difficult").text)
-            if difficult == 1:
-                continue
-            bndbox = [width, height]
-            name = obj.find("name").text.lower().strip()
-            bbox = obj.find("bndbox")
-            pts = ["xmin", "ymin", "xmax", "ymax"]
-            for pt in pts:
-                cur_pixel =  float(bbox.find(pt).text)
-                bndbox.append(cur_pixel)
-            label_idx = self.classes.index(name)
-            bndbox.append(label_idx)
-            ret += [bndbox]
-
-        return np.array(ret) # [width, height, xmin, ymin, xamx, ymax, label_idx]
-
-xml_paths = glob("../Datasets/annotations/xmls/*.xml")
-classes = ["dog", "cat"]
-
-transform_anno = xml2list(classes)
-
-df = pd.DataFrame(columns=["image_id", "width", "height", "xmin", "ymin", "xmax", "ymax", "class"])
-
-for path in xml_paths:
-    image_id = path.split("/")[-1].split(".")[0]
-    bboxs = transform_anno(path)
-
-    for bbox in bboxs:
-        tmp = pd.Series(bbox, index=["width", "height", "xmin", "ymin", "xmax", "ymax", "class"])
-        tmp["image_id"] = image_id
-        df = df.append(tmp, ignore_index=True)
-
-df = df.sort_values(by="image_id", ascending=True)
-
-# 背景のクラス（0）が必要のため、dog, cat のラベルは1スタートにする
-df["class"] = df["class"] + 1
-
-class MyDataset(torch.utils.data.Dataset):
-
-    def __init__(self, df, image_dir):
-
+class MyDataset(Dataset):
+    def __init__(self, df, split):
         super().__init__()
-
-        self.image_ids = df["image_id"].unique()
-        self.df = df
-        self.image_dir = image_dir
-
+        #self.df_original = pd.read_csv(csv_path)
+        self.df = df[df['split']==split] # Split dataset according to csv.
+        self.image_index = self.df.columns.get_loc('image_id')
+        self.label_index = self.df.columns.get_loc('label')
+        #self.path_index = self.df.columns.get_loc('image_id')
+        self.transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])])
     def __getitem__(self, index):
-
-        transform = transforms.Compose([
-                                        transforms.ToTensor()
-        ])
-
-        # 入力画像の読み込み
-        image_id = self.image_ids[index]
-        image = Image.open(f"{self.image_dir}/{image_id}.jpg")
-        image = transform(image)
+        # Load image
+        image_idx = self.df.iat[index, self.image_index]
+        image = Image.open(csv_path.rsplit('/',2)[0] + '/Images/' + image_idx + '.jpg')
+        # Process image
+        if self.transform:
+            image = self.transform(image)
 
         # アノテーションデータの読み込み
-        records = self.df[self.df["image_id"] == image_id]
+        records = self.df[:index]
+        #records = self.df[self.df["image_id"] == image_id]
         boxes = torch.tensor(records[["xmin", "ymin", "xmax", "ymax"]].values, dtype=torch.float32)
 
         area = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])
         area = torch.as_tensor(area, dtype=torch.float32)
 
-        labels = torch.tensor(records["class"].values, dtype=torch.int64)
+        labels = torch.tensor(records["label"].values, dtype=torch.int64)
 
         iscrowd = torch.zeros((records.shape[0], ), dtype=torch.int64)
 
@@ -101,28 +64,36 @@ class MyDataset(torch.utils.data.Dataset):
         target["area"] = area
         target["iscrowd"] = iscrowd
 
-        return image, target, image_id
+        return image, target, image_idx
 
     def __len__(self):
-        return self.image_ids.shape[0]
+        return len(self.df)
 
-image_dir = "../Datasets/images/"
-dataset = MyDataset(df, image_dir)
+# Load data
+train_data = MyDataset(df, 'train')
+val_data   = MyDataset(df, 'val')
 
+print('train_data = ', len(train_data))
+print('val_data = ', len(val_data))
 
-torch.manual_seed(2020)
-
-n_train = int(len(dataset) * 0.7)
-n_val = len(dataset) - n_train
-
-train, val = torch.utils.data.random_split(dataset, [n_train, n_val])
-
+# レポジトリのutils.pyの中のcollate_fn関数を呼び出している。これが大事っぽい。多分画像の整形とか一気にしてくれている。
 def collate_fn(batch):
     return tuple(zip(*batch))
 
-train_dataloader = torch.utils.data.DataLoader(train, batch_size=4, shuffle=True, collate_fn=collate_fn)
-val_dataloader = torch.utils.data.DataLoader(val, batch_size=4, shuffle=False, collate_fn=collate_fn)
+# Set data loader
+train_loader = torch.utils.data.DataLoader(
+      dataset=train_data,  # set dataset
+      batch_size=args.batch_size,  # set batch size
+      shuffle=True,  # shuffle or not
+      num_workers=0,
+      collate_fn=collate_fn)  # set number of cores
 
+valid_loader = torch.utils.data.DataLoader(
+      dataset=val_data,
+      batch_size=args.val_batch_size,
+      shuffle=True,
+      num_workers=0,
+      collate_fn=collate_fn)
 
 model = torchvision.models.detection.fasterrcnn_resnet50_fpn(pretrained=False)
 
@@ -131,19 +102,15 @@ in_features = model.roi_heads.box_predictor.cls_score.in_features
 model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
 
 
-
 params = [p for p in model.parameters() if p.requires_grad]
 optimizer = torch.optim.SGD(params, lr=0.005, momentum=0.9, weight_decay=0.0005)
-num_epochs = 3
+num_epochs = args.epochs
 
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
 for epoch in range(num_epochs):
-
     model.train()
-
-    for i, batch in enumerate(train_dataloader):
-
+    for i, batch in enumerate(train_loader):
         images, targets, image_ids = batch
 
         images = list(image.to(device) for image in images)
