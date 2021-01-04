@@ -5,8 +5,8 @@ import os
 from glob import glob
 import datetime
 
-#img_size_dir = '../Original/'
-img_size_dir = '../Small/'
+img_size_dir = '../Original/'
+#img_size_dir = '../Small/'
 csv_dir = img_size_dir + 'Split/'
 
 os.makedirs(csv_dir, exist_ok=True)
@@ -26,8 +26,8 @@ def train_validate_test_split(df, train_percent=.8, validate_percent=.1, seed=No
     test['split'] = 'test'
     return train, validate, test
 
-df_category_dog = df[df['label'] == 'dog']
-df_category_cat = df[df['label'] == 'cat']
+df_category_dog = df[df['class'] == 'dog']
+df_category_cat = df[df['class'] == 'cat']
 
 train_0, validation_0, test_0 = train_validate_test_split(df_category_dog)
 train_1, validation_1, test_1 = train_validate_test_split(df_category_cat)

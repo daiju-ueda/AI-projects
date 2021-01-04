@@ -7,8 +7,8 @@ import xml.etree.ElementTree as ET
 
 class xml2list(object):
 
-    def __init__(self, labels):
-        self.labels = labels
+    def __init__(self, classes):
+        self.classes = classes
 
     def __call__(self, xml_path):
 
@@ -32,23 +32,22 @@ class xml2list(object):
                 bndbox.append(cur_pixel)
             bndbox.append(name)
             ret += [bndbox]
-
-        return np.array(ret) # [width, height, xmin, ymin, xamx, ymax, label_idx]
+        return np.array(ret)
 
 xml_paths = glob("../Original/Annotations/*.xml")
 #img_paths = glob("../Original/Images/*.xml")
-labels = ["dog", "cat"]
+classes = ["dog", "cat"]
 
-transform_anno = xml2list(labels)
+transform_anno = xml2list(classes)
 
-df = pd.DataFrame(columns=["image_id", "width", "height", "xmin", "ymin", "xmax", "ymax", "label"])
+df = pd.DataFrame(columns=["image_id", "width", "height", "xmin", "ymin", "xmax", "ymax", "class"])
 
 for path in xml_paths:
     image_id = path.split("/")[-1].split(".")[0]
     bboxs = transform_anno(path)
 
     for bbox in bboxs:
-        tmp = pd.Series(bbox, index=["width", "height", "xmin", "ymin", "xmax", "ymax", "label"])
+        tmp = pd.Series(bbox, index=["width", "height", "xmin", "ymin", "xmax", "ymax", "class"])
         tmp["image_id"] = image_id
         df = df.append(tmp, ignore_index=True)
 
